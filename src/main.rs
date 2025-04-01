@@ -23,6 +23,7 @@ fn main() -> iced::Result {
 #[derive(Debug, Clone)]
 pub enum Message {
     Shutdown,
+    ClosedDatabase,
     DumpedConfig,
     WelcomePressed,
     SearchPressed,
@@ -32,10 +33,13 @@ pub enum Message {
     InitializeInputChanged(String),
     InitializeSubmit,
     InitializeOpenFilePicker,
-    CreateOpenDatabase(String),
+    CreateDatabase(String),
+    OpenDatabase(String),
+    OpenDatabaseSuccess(Pool<Sqlite>),
     CreateDatabaseSuccess(Pool<Sqlite>),
     CreateDatabaseFailure(String),
-    ClosedDatabase,
+    DatabaseTransactionSuccess(Pool<Sqlite>),
+    DatabaseTransactionFailure(Pool<Sqlite>, String),
 }
 
 #[derive(Debug)]
@@ -74,6 +78,13 @@ impl Catalog {
                 } else {
                     Task::perform(Self::dump_config(self.config.clone()), |x| x)
                 }
+            }
+            Message::ClosedDatabase => {
+                let future = async {
+                    Message::Shutdown
+                };
+                
+                Task::perform(future, |x| x)
             }
             Message::DumpedConfig => {
                 window::get_latest().and_then(window::close)
@@ -167,22 +178,31 @@ impl Catalog {
 
                 Task::perform(future, |x| x)
             }
-            Message::CreateOpenDatabase(path) => {
+            Message::OpenDatabase(path) => {
+                Task::perform(database::open_database(path), |x| x)
+            }
+            Message::CreateDatabase(path) => {
                 Task::perform(database::create_database(path), |x| x)
             }
-            Message::CreateDatabaseFailure(msg) => {
+            Message::OpenDatabaseSuccess(database) => {
+                self.current_database = Some(database);
                 Task::none()
             }
             Message::CreateDatabaseSuccess(database) => {
                 self.current_database = Some(database);
                 Task::none()
             }
-            Message::ClosedDatabase => {
-                let future = async {
-                    Message::Shutdown
-                };
-                
-                Task::perform(future, |x| x)
+            Message::CreateDatabaseFailure(msg) => {
+                Task::none()
+            }
+            Message::DatabaseTransactionSuccess(pool) => {
+                self.current_database = Some(pool);
+                Task::none()
+            }
+            Message::DatabaseTransactionFailure(pool, msg) => {
+                self.current_database = Some(pool);
+                // TODO: display toast
+                Task::none()
             }
         }
     }
