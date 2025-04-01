@@ -239,16 +239,17 @@ impl Catalog {
         use tokio::io::AsyncReadExt;
 
         stream::channel(100, |mut output| async move {
+
+            match Catalog::setup_config_dir() {
+                Err(error) => {
+                    let _ = output.send(Message::InitializationFailed(error.to_string() + ": setting config dir")).await;
+                    return;
+                }
+                _ => {}
+            }
             let project_dirs = if let Some(project_dirs) = ProjectDirs::from("org", "Ki11erRabbit", "Catalog") {
                 project_dirs
             } else {
-                match Catalog::setup_config_dir() {
-                    Err(error) => {
-                        let _ = output.send(Message::InitializationFailed(error.to_string() + ": setting config dir")).await;
-                        return;
-                    }
-                    _ => {}
-                }
                 ProjectDirs::from("org", "Ki11erRabbit", "Catalog")
                     .expect("just created directory but somehow it doesn't exist")
             };
@@ -505,14 +506,14 @@ impl Catalog {
             use std::path::Path;
             let text = text(config.as_str());
 
-            let button_text = if Path::new(config).exists() {
-                "Open Database"
+            let (button_text, on_press) = if Path::new(config).exists() {
+                ("Open Database", Message::OpenDatabase(config.clone()))
             } else {
-                "Create Database"
+                ("Create Database", Message::CreateDatabase(config.clone()))
             };
 
             let button = padded_button(button_text)
-                .on_press(Message::CreateOpenDatabase(config.clone()));
+                .on_press(on_press);
 
             database_list = database_list.push(row![text, button]);
         }
