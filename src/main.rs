@@ -7,6 +7,7 @@ use iced::{
     Element, Subscription, Task
 };
 use serde::{Deserialize, Serialize};
+use sqlx::{Sqlite, Pool};
 
 
 fn main() -> iced::Result {
@@ -27,14 +28,18 @@ pub enum Message {
     InitializationSuccessful(Config),
     InitializeInputChanged(String),
     InitializeSubmit,
-    OpenFilePicker,
+    InitializeOpenFilePicker,
+    CreateOpenDatabase(String),
+    CreateDatabaseSuccess(Pool<Sqlite>),
+    CreateDatabaseFailure(String),
+    ClosedDatabase,
 }
 
 #[derive(Debug)]
 pub enum Screen {
     Starting,
     InitializeEmpty(String),
-    InitializeChoice,
+    InitializeChoice(String),
     InitializeError(String),
     Welcome,
     Add,
@@ -73,7 +78,6 @@ impl Catalog {
                 Task::none()
             }
             Message::InitializationFailed(msg) => {
-                println!("{}", msg);
                 //TODO: prevent the user doing anything
                 self.screen = Screen::InitializeError(msg);
                 Task::none()
@@ -85,14 +89,82 @@ impl Catalog {
 
                     return Task::none();
                 }
-                self.screen = Screen::InitializeChoice;
+                self.screen = Screen::InitializeChoice(String::new());
                 Task::none()
             }
-            Message::InitializeInputChanged(_) => Task::none(),
+            Message::InitializeInputChanged(input) => {
+                match &mut self.screen {
+                    Screen::InitializeEmpty(msg) => {
+                        *msg = input
+                    }
+                    _ => {},
+                }
+                Task::none()
+            },
             Message::InitializeSubmit => {
+                match &mut self.screen {
+                    Screen::InitializeEmpty(path) => {
+                        self.config.database_paths.push(path.clone());
+                        self.screen = Screen::InitializeChoice(String::new());
+                        Task::none()
+                    }
+                    Screen::InitializeChoice(path) => {
+                        self.config.database_paths.push(path.clone());
+                        *path = String::new();
+                        Task::none()
+                    }
+                    _ => {
+                        Task::none()
+                    }
+                }
+            }
+            Message::InitializeOpenFilePicker => {
+                use rfd::AsyncFileDialog;
+                use directories::UserDirs;
+
+                let future = async {
+
+                    let user_dir = UserDirs::new().expect("user doesn't have a home directory");
+                    let Some(path) = user_dir.home_dir()
+                        .as_os_str()
+                        .to_str() else {
+                            return Message::InitializationFailed(String::from("Failed to select a path"))
+                        };
+
+                    let path = path.to_string();
+
+                    let file = AsyncFileDialog::new()
+                        .set_directory(path)
+                        .add_filter("sqlite", &["sqlite"])
+                        .save_file()
+                        .await;
+
+                    let Some(file) = file else {
+                        return Message::InitializationFailed(String::from("Failed to select a path"))
+                    };
+
+                    let path = file.path()
+                        .as_os_str()
+                        .to_str()
+                        .expect("Could not turn os_str into str")
+                        .to_string();
+
+                    Message::InitializeInputChanged(path)
+                };
+
+                Task::perform(future, |x| x)
+            }
+            Message::CreateOpenDatabase(path) => {
+                self.current_database = path.clone();
+                Task::perform(database::create_database(path), |x| x)
+            }
+            Message::CreateDatabaseFailure(msg) => {
                 Task::none()
             }
-            Message::OpenFilePicker => {
+            Message::CreateDatabaseSuccess(database) => {
+                Task::none()
+            }
+            Message::ClosedDatabase => {
                 Task::none()
             }
         }
@@ -103,7 +175,7 @@ impl Catalog {
         match self.screen {
             Screen::Starting => self.starting(),
             Screen::InitializeEmpty(_) => self.initialize_empty(),
-            Screen::InitializeChoice => self.initialize_empty(),
+            Screen::InitializeChoice(_) => self.initialize_choice(),
             Screen::InitializeError(_) => self.initialize_error(),
             Screen::Welcome => self.welcome(),
             Screen::Add => self.add(),
@@ -277,7 +349,6 @@ impl Catalog {
     }
 
     fn initialize_empty(&self) -> Element<Message> {
-        let controls = self.get_controls();
         let Screen::InitializeEmpty(input_value) = &self.screen else {
             unreachable!("already checked for screen state");
         };
@@ -287,22 +358,75 @@ impl Catalog {
             .on_input(Message::InitializeInputChanged)
             .on_submit(Message::InitializeSubmit);
 
+
         let file_picker_button = padded_button("open file picker")
-            .on_press(Message::OpenFilePicker);
+            .on_press(Message::InitializeOpenFilePicker);
 
         let submit_input_button = padded_button("Create Database")
             .on_press(Message::InitializeSubmit);
+
+        let buttons = column![submit_input_button, file_picker_button];
         
         let contents = Self::container("Create a new database")
             .push(
                 "Create a new database to begin"
             )
             .push(
-                row![input, submit_input_button]
+                row![input, buttons]
                 );
 
 
-        let content: Element<_> = column![controls, contents, file_picker_button]
+        let content: Element<_> = column![contents]
+            .into();
+        content
+    }
+
+    fn initialize_choice(&self) -> Element<Message> {
+        let Screen::InitializeChoice(input_value) = &self.screen else {
+            unreachable!("already checked for screen state");
+        };
+
+        let input = text_input("Enter absolute path for database", input_value)
+            .id("new-database")
+            .on_input(Message::InitializeInputChanged)
+            .on_submit(Message::InitializeSubmit);
+
+
+        let file_picker_button = padded_button("open file picker")
+            .on_press(Message::InitializeOpenFilePicker);
+
+        let submit_input_button = padded_button("Create Database")
+            .on_press(Message::InitializeSubmit);
+
+        let buttons = column![submit_input_button, file_picker_button];
+        
+        let contents = Self::container("Create a new database")
+            .push(
+                "Create a new database to begin"
+            )
+            .push(
+                row![input, buttons]
+                );
+
+        let mut database_list = column![];
+            
+        for config in self.config.database_paths.iter() {
+            use std::path::Path;
+            let text = text(config.as_str());
+
+            let button_text = if Path::new(config).exists() {
+                "Open Database"
+            } else {
+                "Create Database"
+            };
+
+            let button = padded_button(button_text)
+                .on_press(Message::CreateOpenDatabase(config.clone()));
+
+            database_list = database_list.push(row![text, button]);
+        }
+
+        let content: Element<_> = column![database_list, contents]
             .into();
         content
     }
