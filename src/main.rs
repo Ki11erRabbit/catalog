@@ -1,6 +1,7 @@
 mod database;
 
 use iced::{
+    window,
     futures::{SinkExt, Stream},
     stream,
     widget::{button, column, horizontal_space, row, text, Button, Column, Row, text_input},
@@ -13,7 +14,7 @@ use sqlx::{Sqlite, Pool};
 fn main() -> iced::Result {
 
     iced::application(Catalog::title, Catalog::update, Catalog::view)
-        .subscription(Catalog::initialize_subscription)
+        .subscription(Catalog::subscriptions)
         .run()
 }
 
@@ -21,6 +22,8 @@ fn main() -> iced::Result {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Shutdown,
+    DumpedConfig,
     WelcomePressed,
     SearchPressed,
     AddPressed,
@@ -55,7 +58,7 @@ pub struct Config {
 pub struct Catalog {
     screen: Screen,
     config: Config,
-    current_database: String,
+    current_database: Option<Pool<Sqlite>>,
 }
 
 impl Catalog {
@@ -65,6 +68,16 @@ impl Catalog {
 
     pub fn update(&mut self, event: Message) -> Task<Message> {
         match event {
+            Message::Shutdown => {
+                if let Some(pool) = self.current_database.take() {
+                    Task::perform(database::close_database(pool), |x| x)
+                } else {
+                    Task::perform(Self::dump_config(self.config.clone()), |x| x)
+                }
+            }
+            Message::DumpedConfig => {
+                window::get_latest().and_then(window::close)
+            }
             Message::WelcomePressed => {
                 self.screen = Screen::Welcome;
                 Task::none()
@@ -155,17 +168,21 @@ impl Catalog {
                 Task::perform(future, |x| x)
             }
             Message::CreateOpenDatabase(path) => {
-                self.current_database = path.clone();
                 Task::perform(database::create_database(path), |x| x)
             }
             Message::CreateDatabaseFailure(msg) => {
                 Task::none()
             }
             Message::CreateDatabaseSuccess(database) => {
+                self.current_database = Some(database);
                 Task::none()
             }
             Message::ClosedDatabase => {
-                Task::none()
+                let future = async {
+                    Message::Shutdown
+                };
+                
+                Task::perform(future, |x| x)
             }
         }
     }
@@ -181,6 +198,14 @@ impl Catalog {
             Screen::Add => self.add(),
             Screen::Search => self.search(),
         }
+    }
+
+    fn close_events(&self) -> Subscription<Message> {
+        window::close_events().map(|_| Message::Shutdown)
+    }
+
+    fn subscriptions(&self) -> Subscription<Message> {
+        Subscription::batch([self.initialize_subscription(), self.close_events()])
     }
 
     fn initialize_subscription(&self) -> Subscription<Message> {
@@ -256,6 +281,52 @@ impl Catalog {
         })
     }
 
+    async fn dump_config(config: Config) -> Message {
+        use directories::ProjectDirs;
+        use std::path::PathBuf;
+        use tokio::fs::OpenOptions;
+        use tokio::io::AsyncWriteExt;
+        
+        let project_dirs = if let Some(project_dirs) = ProjectDirs::from("org", "Ki11erRabbit", "Catalog") {
+            project_dirs
+        } else {
+            match Catalog::setup_config_dir() {
+                Err(error) => {
+                    // TODO: send out notification that getting failed
+                    return Message::DumpedConfig;
+                }
+                _ => {}
+            }
+            ProjectDirs::from("org", "Ki11erRabbit", "Catalog")
+                .expect("just created directory but somehow it doesn't exist")
+        };
+
+        let config_dir = project_dirs.config_dir();
+        let mut catalog_toml = PathBuf::new();
+        catalog_toml.push(config_dir);
+        catalog_toml.push("databases.toml");
+
+        let mut file = match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(catalog_toml).await {
+                Err(error) => {
+                    // TODO: report error opening config file
+                    return Message::DumpedConfig;
+                }
+                Ok(file) => file,
+            };
+
+        let config = toml::to_string(&config).expect("todo: handle config serialization");
+
+        file.write_all(config.as_bytes())
+            .await
+            .expect("todo: handle failure writing to config");
+
+        Message::DumpedConfig
+    }
+
     fn setup_config_dir_common() -> std::io::Result<directories::UserDirs> {
         use std::io::{Error, ErrorKind};
         use directories::UserDirs;
@@ -314,7 +385,7 @@ impl Catalog {
         Catalog {
             screen: Screen::Starting,
             config: Config::default(),
-            current_database: String::new(),
+            current_database: None,
         }
     }
 
@@ -338,9 +409,9 @@ impl Catalog {
 
     fn starting(&self) -> Element<Message> {
         let controls = self.get_controls();
-        let contents = Self::container("Welcome!")
+        let contents = Self::container("Starting")
             .push(
-                "This is a simple cataloging software, driven by sqlite"
+                "we are waiting for things to start so please be patient"
             );
 
         let content: Element<_> = column![controls, contents]
