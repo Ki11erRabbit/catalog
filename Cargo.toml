@@ -5,4 +5,9 @@ edition = "2024"
 
 [dependencies]
 sqlx = { version = "0.8", features = [ "runtime-async-std" ] }
-iced = "0.13.1"
+iced = { version = "0.13.1", features = [ "tokio" ] }
+directories = "6.0.0"
+toml = "0.8.20"
+serde = { version = "1.0.219", features = ["derive"] }
+tokio = { version = "1.44.1", features = ["full"] }
+rfd = "0.15.3"
