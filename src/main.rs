@@ -1,14 +1,12 @@
 mod database;
+mod toast;
 
 use iced::{
-    window,
-    futures::{SinkExt, Stream},
-    stream,
-    widget::{button, column, horizontal_space, row, text, Button, Column, Row, text_input},
-    Element, Subscription, Task
+    futures::{SinkExt, Stream}, stream, widget::{button, column, horizontal_space, row, text, text_input, Button, Column, Row}, window, Element, Subscription, Task
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, Pool};
+use toast::{Status, Toast};
 
 
 fn main() -> iced::Result {
@@ -40,6 +38,10 @@ pub enum Message {
     CreateDatabaseFailure(String),
     DatabaseTransactionSuccess(Pool<Sqlite>),
     DatabaseTransactionFailure(Pool<Sqlite>, String),
+    AddRackUpdate(String),
+    AddShelfUpdate(String),
+    AddBasketUpdate(String),
+    AddItemUpdate(String),
 }
 
 #[derive(Debug)]
@@ -49,7 +51,12 @@ pub enum Screen {
     InitializeChoice(String),
     InitializeError(String),
     Welcome,
-    Add,
+    Add {
+        rack_number: String,
+        shelf_number: String,
+        basket_number: String,
+        item_name: String,
+    },
     Search,
 }
 
@@ -58,11 +65,12 @@ pub struct Config {
     database_paths: Vec<String>
 }
 
-#[derive(Debug)]
+
 pub struct Catalog {
     screen: Screen,
     config: Config,
     current_database: Option<Pool<Sqlite>>,
+    toasts: Vec<Toast>,
 }
 
 impl Catalog {
@@ -94,7 +102,12 @@ impl Catalog {
                 Task::none()
             }
             Message::AddPressed => {
-                self.screen = Screen::Add;
+                self.screen = Screen::Add {
+                    rack_number: String::new(),
+                    shelf_number: String::new(),
+                    basket_number: String::new(),
+                    item_name: String::new(),
+                };
                 Task::none()
             }
             Message::SearchPressed => {
@@ -128,11 +141,23 @@ impl Catalog {
             Message::InitializeSubmit => {
                 match &mut self.screen {
                     Screen::InitializeEmpty(path) => {
+                        if path.len() == 0 {
+                            self.toasts.push(
+                                Toast::new("Submit", String::from("please provide a path to a .sqlite file"), Status::Error)
+                            );
+                            return Task::none();
+                        }
                         self.config.database_paths.push(path.clone());
                         self.screen = Screen::InitializeChoice(String::new());
                         Task::none()
                     }
                     Screen::InitializeChoice(path) => {
+                        if path.len() == 0 {
+                            self.toasts.push(
+                                Toast::new("Submit", String::from("please provide a path to a .sqlite file"), Status::Error)
+                            );
+                            return Task::none();
+                        }
                         self.config.database_paths.push(path.clone());
                         *path = String::new();
                         Task::none()
@@ -189,10 +214,11 @@ impl Catalog {
                 Task::none()
             }
             Message::CreateDatabaseSuccess(database) => {
-                self.current_database = Some(database);
-                Task::none()
+                self.screen = Screen::Welcome;
+                Task::perform(database::initialize_database(database), |x| x)
             }
             Message::CreateDatabaseFailure(msg) => {
+                self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
                 Task::none()
             }
             Message::DatabaseTransactionSuccess(pool) => {
@@ -201,7 +227,43 @@ impl Catalog {
             }
             Message::DatabaseTransactionFailure(pool, msg) => {
                 self.current_database = Some(pool);
-                // TODO: display toast
+                self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
+                Task::none()
+            }
+            Message::AddRackUpdate(rack_number) => {
+                match &mut self.screen {
+                    Screen::Add { rack_number: rack, .. } => {
+                        *rack = rack_number;
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::AddShelfUpdate(shelf_number) => {
+                match &mut self.screen {
+                    Screen::Add { shelf_number: shelf, .. } => {
+                        *shelf = shelf_number;
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::AddBasketUpdate(basket_number) => {
+                match &mut self.screen {
+                    Screen::Add { basket_number: basket, .. } => {
+                        *basket = basket_number;
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
+            Message::AddItemUpdate(item_name) => {
+                match &mut self.screen {
+                    Screen::Add { item_name: item, .. } => {
+                        *item = item_name;
+                    }
+                    _ => {}
+                }
                 Task::none()
             }
         }
@@ -215,7 +277,7 @@ impl Catalog {
             Screen::InitializeChoice(_) => self.initialize_choice(),
             Screen::InitializeError(_) => self.initialize_error(),
             Screen::Welcome => self.welcome(),
-            Screen::Add => self.add(),
+            Screen::Add {..} => self.add(),
             Screen::Search => self.search(),
         }
     }
@@ -307,17 +369,18 @@ impl Catalog {
         use std::path::PathBuf;
         use tokio::fs::OpenOptions;
         use tokio::io::AsyncWriteExt;
+
+        match Catalog::setup_config_dir() {
+            Err(error) => {
+                // TODO: send out notification that getting failed
+                return Message::DumpedConfig;
+            }
+            _ => {}
+        }
         
         let project_dirs = if let Some(project_dirs) = ProjectDirs::from("org", "Ki11erRabbit", "Catalog") {
             project_dirs
         } else {
-            match Catalog::setup_config_dir() {
-                Err(error) => {
-                    // TODO: send out notification that getting failed
-                    return Message::DumpedConfig;
-                }
-                _ => {}
-            }
             ProjectDirs::from("org", "Ki11erRabbit", "Catalog")
                 .expect("just created directory but somehow it doesn't exist")
         };
@@ -333,6 +396,7 @@ impl Catalog {
             .create(true)
             .open(catalog_toml).await {
                 Err(error) => {
+                    println!("{}", error);
                     // TODO: report error opening config file
                     return Message::DumpedConfig;
                 }
@@ -344,6 +408,10 @@ impl Catalog {
         file.write_all(config.as_bytes())
             .await
             .expect("todo: handle failure writing to config");
+
+        _ = file.flush().await;
+
+        drop(file);
 
         Message::DumpedConfig
     }
@@ -407,6 +475,7 @@ impl Catalog {
             screen: Screen::Starting,
             config: Config::default(),
             current_database: None,
+            toasts: Vec::new(),
         }
     }
 
@@ -422,6 +491,9 @@ impl Catalog {
                 horizontal_space(),
                 padded_button("Search")
                     .on_press(Message::SearchPressed),
+                horizontal_space(),
+                padded_button("Save and Exit")
+                    .on_press(Message::Shutdown),
                 horizontal_space(),
             ];
 
@@ -550,10 +622,24 @@ impl Catalog {
     }
 
     fn add(&self) -> Element<Message> {
+        let Screen::Add { rack_number, shelf_number, basket_number, item_name } = &self.screen else {
+            unreachable!("should have already checked for this state");
+        };
         let controls = self.get_controls();
         let contents = Self::container("Add")
             .push(
                 "This is a simple cataloging software, driven by sqlite"
+            )
+            .push(
+                row![
+                    Self::pair_input_text("Enter rack number", rack_number.as_str(), Message::AddRackUpdate),
+                    Self::pair_input_text("Enter shelf number", shelf_number.as_str(), Message::AddShelfUpdate)
+                ])
+            .push(
+                row![
+                    Self::pair_input_text("Enter basket number", basket_number.as_str(), Message::AddBasketUpdate),
+                    Self::pair_input_text("Enter item name", item_name.as_str(), Message::AddItemUpdate)
+                ]
             );
         let content: Element<_> = column![controls, contents]
             .into();
@@ -569,6 +655,14 @@ impl Catalog {
         let content: Element<_> = column![controls, contents]
             .into();
         content
+    }
+
+    fn pair_input_text<'a>(label_text: &'a str, input: &'a str, message: impl Fn(String) -> Message + 'a) -> Column<'a, Message> {
+        column![
+            text(label_text),
+            text_input(label_text, input)
+                .on_input(message)
+        ]
     }
 
     fn container(title: &str) -> Column<'_, Message> {

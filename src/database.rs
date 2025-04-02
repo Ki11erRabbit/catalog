@@ -71,3 +71,46 @@ pub async fn initialize_database(pool: SqlitePool) -> Message {
         }
     }
 }
+
+
+pub async fn insert(
+    pool: SqlitePool,
+    rack: String,
+    shelf: String,
+    basket: String,
+    name: String
+) -> Message {
+    match pool.begin().await {
+        Err(err) => {
+            Message::DatabaseTransactionFailure(pool, err.to_string())
+        }
+        Ok(mut connection) => {
+            let result = sqlx::query("INSERT INTO Rack IF NOT EXISTS (rack_id) VALUES ($1)")
+                .bind(&rack)
+                .execute(&mut *connection)
+                .await;
+
+            let result = sqlx::query("INSERT INTO Shelf IF NOT EXISTS (shelf_id) VALUES ($1)")
+                .bind(&shelf)
+                .execute(&mut *connection)
+                .await;
+
+            let result = sqlx::query("INSERT INTO Basket IF NOT EXISTS (basket_id) VALUES ($1)")
+                .bind(&basket)
+                .execute(&mut *connection)
+                .await;
+
+            let result = sqlx::query("INSERT INTO Item (rack_id, shelf_id, basket_id, name) VALUES ($1, $2, $3, $4)")
+                .bind(rack)
+                .bind(shelf)
+                .bind(basket)
+                .bind(name)
+                .execute(&mut *connection)
+                .await;
+
+            let result = connection.commit();
+
+            Message::DatabaseTransactionSuccess(pool)
+        }
+    }
+}
