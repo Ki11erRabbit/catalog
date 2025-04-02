@@ -85,20 +85,41 @@ pub async fn insert(
             Message::DatabaseTransactionFailure(pool, err.to_string())
         }
         Ok(mut connection) => {
-            let result = sqlx::query("INSERT INTO Rack IF NOT EXISTS (rack_id) VALUES ($1)")
+            let result = sqlx::query("INSERT OR IGNORE INTO Rack (rack_id) VALUES ($1)")
                 .bind(&rack)
                 .execute(&mut *connection)
                 .await;
 
-            let result = sqlx::query("INSERT INTO Shelf IF NOT EXISTS (shelf_id) VALUES ($1)")
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
+
+            let result = sqlx::query("INSERT OR IGNORE INTO Shelf (shelf_id) VALUES ($1)")
                 .bind(&shelf)
                 .execute(&mut *connection)
                 .await;
 
-            let result = sqlx::query("INSERT INTO Basket IF NOT EXISTS (basket_id) VALUES ($1)")
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
+
+            let result = sqlx::query("INSERT OR IGNORE INTO Basket (basket_id) VALUES ($1)")
                 .bind(&basket)
                 .execute(&mut *connection)
                 .await;
+
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
 
             let result = sqlx::query("INSERT INTO Item (rack_id, shelf_id, basket_id, name) VALUES ($1, $2, $3, $4)")
                 .bind(rack)
@@ -108,7 +129,21 @@ pub async fn insert(
                 .execute(&mut *connection)
                 .await;
 
-            let result = connection.commit();
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
+
+            let result = connection.commit().await;
+
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
 
             Message::DatabaseTransactionSuccess(pool)
         }
