@@ -52,6 +52,8 @@ pub enum Message {
     AddItem,
     DatabaseSearchSuccess(Pool<Sqlite>, ItemInfo),
     DatabaseSearchFailure(Pool<Sqlite>),
+    SearchQueryUpdate(String),
+    SearchQuery,
 }
 
 #[derive(Debug)]
@@ -67,7 +69,10 @@ pub enum Screen {
         basket_number: String,
         item_name: String,
     },
-    Search,
+    Search {
+        query: String,
+        result: Option<ItemInfo>
+    },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -121,7 +126,7 @@ impl Catalog {
                 Task::none()
             }
             Message::SearchPressed => {
-                self.screen = Screen::Search;
+                self.screen = Screen::Search { result: None, query: String::new() };
                 Task::none()
             }
             Message::InitializationFailed(msg) => {
@@ -309,10 +314,39 @@ impl Catalog {
                 }
             }
             Message::DatabaseSearchSuccess(pool, item_info) => {
-                Task::none()
+                self.current_database = Some(pool);
+                match &mut self.screen {
+                    Screen::Search { result, .. } => {
+                        *result = Some(item_info);
+                        Task::none()
+                    }
+                    _ => Task::none(),
+                }
             }
             Message::DatabaseSearchFailure(pool) => {
+                self.current_database = Some(pool);
                 Task::none()
+            }
+            Message::SearchQueryUpdate(query_update) => {
+                match &mut self.screen {
+                    Screen::Search { query, .. } => {
+                        *query = query_update;
+                        Task::none()
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::SearchQuery => {
+                if let Some(database) = self.current_database.take() {
+                    match &self.screen {
+                        Screen::Search { query, ..} => {
+                            Task::perform(database::search(database, query.clone()), |x| x)
+                        }
+                        _ => Task::none(),
+                    }
+                } else {
+                    Task::none()
+                }
             }
         }
     }
@@ -326,7 +360,7 @@ impl Catalog {
             Screen::InitializeError(_) => self.initialize_error(),
             Screen::Welcome => self.welcome(),
             Screen::Add {..} => self.add(),
-            Screen::Search => self.search(),
+            Screen::Search {..} => self.search(),
         }
     }
 
@@ -702,10 +736,34 @@ impl Catalog {
 
     fn search(&self) -> Element<Message> {
         let controls = self.get_controls();
+        let Screen::Search { query, result } = &self.screen else {
+            unreachable!("already checked for search state but incorrect");
+        };
         let contents = Self::container("Search")
             .push(
                 "This is a simple cataloging software, driven by sqlite"
+            )
+            .push(
+                row![
+                    Self::pair_input_text("Enter Item Name", query.as_str(), Message::SearchQueryUpdate),
+                    padded_button("Search").on_press(Message::SearchQuery),
+                ]
             );
+
+        let contents = if let Some(result) = result {
+            contents
+                .push(
+                    column![
+                        text("Results").size(20),
+                        text(format!("Rack: {}", result.rack_number)),
+                        text(format!("Shelf: {}", result.shelf_number)),
+                        text(format!("Basket: {}", result.basket_number)),
+                        text(format!("Name: {}", result.item_name)),
+                    ]
+                )
+        } else {
+            contents
+        };
         let content: Element<_> = column![controls, contents]
             .into();
         content
