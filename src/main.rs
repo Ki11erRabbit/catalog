@@ -16,6 +16,13 @@ fn main() -> iced::Result {
         .run()
 }
 
+#[derive(Debug, Clone)]
+pub struct ItemInfo {
+    rack_number: String,
+    shelf_number: String,
+    basket_number: String,
+    item_name: String,
+}
 
 
 #[derive(Debug, Clone)]
@@ -42,6 +49,9 @@ pub enum Message {
     AddShelfUpdate(String),
     AddBasketUpdate(String),
     AddItemUpdate(String),
+    AddItem,
+    DatabaseSearchSuccess(Pool<Sqlite>, ItemInfo),
+    DatabaseSearchFailure(Pool<Sqlite>),
 }
 
 #[derive(Debug)]
@@ -218,6 +228,7 @@ impl Catalog {
                 Task::perform(database::initialize_database(database), |x| x)
             }
             Message::CreateDatabaseFailure(msg) => {
+                println!("{}", msg);
                 self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
                 Task::none()
             }
@@ -227,6 +238,7 @@ impl Catalog {
             }
             Message::DatabaseTransactionFailure(pool, msg) => {
                 self.current_database = Some(pool);
+                println!("{}", msg);
                 self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
                 Task::none()
             }
@@ -264,6 +276,42 @@ impl Catalog {
                     }
                     _ => {}
                 }
+                Task::none()
+            }
+            Message::AddItem => {
+                use std::mem::swap;
+                match &mut self.screen {
+                    Screen::Add { rack_number, shelf_number, basket_number, item_name } => {
+                        if let Some(database) = self.current_database.take() {
+                            let mut rack = String::new();
+                            let mut shelf = String::new();
+                            let mut basket = String::new();
+                            let mut item = String::new();
+                            swap(rack_number, &mut rack);
+                            swap(shelf_number, &mut shelf);
+                            swap(basket_number, &mut basket);
+                            swap(item_name, &mut item);
+
+                            let future = database::insert(
+                                database,
+                                rack,
+                                shelf,
+                                basket,
+                                item
+                            );
+
+                            Task::perform(future, |x| x)
+                        } else {
+                            Task::none()
+                        }
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::DatabaseSearchSuccess(pool, item_info) => {
+                Task::none()
+            }
+            Message::DatabaseSearchFailure(pool) => {
                 Task::none()
             }
         }
@@ -639,6 +687,12 @@ impl Catalog {
                 row![
                     Self::pair_input_text("Enter basket number", basket_number.as_str(), Message::AddBasketUpdate),
                     Self::pair_input_text("Enter item name", item_name.as_str(), Message::AddItemUpdate)
+                ]
+            )
+            .push(
+                row![
+                    horizontal_space(),
+                    padded_button("Insert").on_press(Message::AddItem)
                 ]
             );
         let content: Element<_> = column![controls, contents]
