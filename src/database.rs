@@ -51,7 +51,7 @@ pub async fn initialize_database(pool: SqlitePool) -> Message {
                 "CREATE TABLE Rack (rack_id UNSIGNED BIG INT, PRIMARY KEY (rack_id))",
                 "CREATE TABLE Shelf (shelf_id UNSIGNED BIG INT, rack_id UNSIGNED BIG INT, PRIMARY KEY (shelf_id), FOREIGN KEY (rack_id) REFERENCES Rack(rack_id))",
                 "CREATE TABLE Basket (shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, PRIMARY KEY (basket_id), FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id))",
-                "CREATE TABLE Item (item_id UNSIGNED BIG INT NOT NULL AUTO_INCREMENT, name TEXT, rack_id UNSIGNED BIG INT, shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, PRIMARY KEY (item_id), FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id) ON DELETE CASCADE, FOREIGN KEY (basket_id) REFERENCES Basket(basket_id) ON DELETE CASCADE, FOREIGN KEY (rack_id) REFERENCES Rack(rack_id) ON DELETE CASCADE)",
+                "CREATE TABLE Item (item_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, rack_id UNSIGNED BIG INT, shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id) ON DELETE CASCADE, FOREIGN KEY (basket_id) REFERENCES Basket(basket_id) ON DELETE CASCADE, FOREIGN KEY (rack_id) REFERENCES Rack(rack_id) ON DELETE CASCADE)",
                 "CREATE INDEX index_item_name ON Item (name)"
             ];
 
@@ -160,7 +160,7 @@ pub async fn search(
             Message::DatabaseTransactionFailure(pool, err.to_string())
         }
         Ok(mut connection) => {
-            let result = sqlx::query("SELECT * FROM Item WITH(INDEX($1))")
+            let result = sqlx::query("SELECT * FROM Item INDEXED BY index_item_name WHERE name = $1")
                 .bind(name)
                 .fetch_all(&mut *connection)
                 .await;
@@ -176,10 +176,10 @@ pub async fn search(
                 Message::DatabaseSearchFailure(pool)
             } else {
                 Message::DatabaseSearchSuccess(pool, ItemInfo {
-                    rack_number: result[0].get("rack_number"),
-                    shelf_number: result[0].get("shelf_number"),
-                    basket_number: result[0].get("basket_number"),
-                    item_name: result[0].get("item_name"),
+                    rack_number: result[0].get("rack_id"),
+                    shelf_number: result[0].get("shelf_id"),
+                    basket_number: result[0].get("basket_id"),
+                    item_name: result[0].get("item_id"),
                 })
             }
         }
