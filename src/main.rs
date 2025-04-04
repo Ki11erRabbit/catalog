@@ -1,12 +1,10 @@
 mod database;
-mod toast;
 
 use iced::{
-    futures::{SinkExt, Stream}, stream, widget::{button, column, horizontal_space, row, text, text_input, Button, Column, Row}, window, Element, Subscription, Task
+    futures::{SinkExt, Stream}, stream, widget::{button, column, horizontal_space, row, text, text_input, scrollable, Button, Column, Row}, window, Element, Subscription, Task
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, Pool};
-use toast::{Status, Toast};
 
 
 fn main() -> iced::Result {
@@ -85,7 +83,7 @@ pub struct Catalog {
     screen: Screen,
     config: Config,
     current_database: Option<Pool<Sqlite>>,
-    toasts: Vec<Toast>,
+    //toasts: Vec<Toast>,
 }
 
 impl Catalog {
@@ -157,9 +155,9 @@ impl Catalog {
                 match &mut self.screen {
                     Screen::InitializeEmpty(path) => {
                         if path.len() == 0 {
-                            self.toasts.push(
+                            /*self.toasts.push(
                                 Toast::new("Submit", String::from("please provide a path to a .sqlite file"), Status::Error)
-                            );
+                            );*/
                             return Task::none();
                         }
                         self.config.database_paths.push(path.clone());
@@ -168,9 +166,9 @@ impl Catalog {
                     }
                     Screen::InitializeChoice(path) => {
                         if path.len() == 0 {
-                            self.toasts.push(
+                            /*self.toasts.push(
                                 Toast::new("Submit", String::from("please provide a path to a .sqlite file"), Status::Error)
-                            );
+                            );*/
                             return Task::none();
                         }
                         self.config.database_paths.push(path.clone());
@@ -234,7 +232,7 @@ impl Catalog {
             }
             Message::CreateDatabaseFailure(msg) => {
                 println!("{}", msg);
-                self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
+                //self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
                 Task::none()
             }
             Message::DatabaseTransactionSuccess(pool) => {
@@ -244,7 +242,7 @@ impl Catalog {
             Message::DatabaseTransactionFailure(pool, msg) => {
                 self.current_database = Some(pool);
                 println!("{}", msg);
-                self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
+                //self.toasts.push(Toast::new("Database Failure", msg, Status::Error));
                 Task::none()
             }
             Message::AddRackUpdate(rack_number) => {
@@ -751,6 +749,7 @@ impl Catalog {
             );
 
         let mut added_result = false;
+        let mut results = column![];
         for item in result.iter() {
             if !added_result {
                 contents = contents
@@ -759,7 +758,7 @@ impl Catalog {
                     );
                 added_result = true;
             }
-            contents = contents
+            results = results
                 .push(
                     column![
                         text(format!("Rack: {}", item.rack_number)),
@@ -770,6 +769,11 @@ impl Catalog {
                     ]
                 );
         };
+        if added_result {
+            // only show results if there were any
+            contents = contents.push(
+                scrollable(results));
+        }
         
         let content: Element<_> = column![controls, contents]
             .into();
