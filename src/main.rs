@@ -50,7 +50,7 @@ pub enum Message {
     AddBasketUpdate(String),
     AddItemUpdate(String),
     AddItem,
-    DatabaseSearchSuccess(Pool<Sqlite>, ItemInfo),
+    DatabaseSearchSuccess(Pool<Sqlite>, Vec<ItemInfo>),
     DatabaseSearchFailure(Pool<Sqlite>),
     SearchQueryUpdate(String),
     SearchQuery,
@@ -71,7 +71,7 @@ pub enum Screen {
     },
     Search {
         query: String,
-        result: Option<ItemInfo>
+        result: Vec<ItemInfo>
     },
 }
 
@@ -126,7 +126,7 @@ impl Catalog {
                 Task::none()
             }
             Message::SearchPressed => {
-                self.screen = Screen::Search { result: None, query: String::new() };
+                self.screen = Screen::Search { result: Vec::new(), query: String::new() };
                 Task::none()
             }
             Message::InitializationFailed(msg) => {
@@ -317,7 +317,7 @@ impl Catalog {
                 self.current_database = Some(pool);
                 match &mut self.screen {
                     Screen::Search { result, .. } => {
-                        *result = Some(item_info);
+                        *result = item_info;
                         Task::none()
                     }
                     _ => Task::none(),
@@ -739,7 +739,7 @@ impl Catalog {
         let Screen::Search { query, result } = &self.screen else {
             unreachable!("already checked for search state but incorrect");
         };
-        let contents = Self::container("Search")
+        let mut contents = Self::container("Search")
             .push(
                 "This is a simple cataloging software, driven by sqlite"
             )
@@ -750,20 +750,27 @@ impl Catalog {
                 ]
             );
 
-        let contents = if let Some(result) = result {
-            contents
+        let mut added_result = false;
+        for item in result.iter() {
+            if !added_result {
+                contents = contents
+                    .push(
+                        text("Results").size(20)
+                    );
+                added_result = true;
+            }
+            contents = contents
                 .push(
                     column![
-                        text("Results").size(20),
-                        text(format!("Rack: {}", result.rack_number)),
-                        text(format!("Shelf: {}", result.shelf_number)),
-                        text(format!("Basket: {}", result.basket_number)),
-                        text(format!("Name: {}", result.item_name)),
+                        text(format!("Rack: {}", item.rack_number)),
+                        text(format!("Shelf: {}", item.shelf_number)),
+                        text(format!("Basket: {}", item.basket_number)),
+                        text(format!("Name: {}", item.item_name)),
+                        horizontal_space(),
                     ]
-                )
-        } else {
-            contents
+                );
         };
+        
         let content: Element<_> = column![controls, contents]
             .into();
         content

@@ -175,12 +175,18 @@ pub async fn search(
             if result.len() == 0 {
                 Message::DatabaseSearchFailure(pool)
             } else {
-                Message::DatabaseSearchSuccess(pool, ItemInfo {
-                    rack_number: result[0].get("rack_id"),
-                    shelf_number: result[0].get("shelf_id"),
-                    basket_number: result[0].get("basket_id"),
-                    item_name: result[0].get("item_id"),
-                })
+
+                let result = result.into_iter()
+                    .map(|row| {
+                        ItemInfo {
+                            rack_number: row.get::<i64,_>("rack_id").to_string(),
+                            shelf_number: row.get::<u64,_>("shelf_id").to_string(),
+                            basket_number: row.get::<u64,_>("basket_id").to_string(),
+                            item_name: row.get("name"),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                Message::DatabaseSearchSuccess(pool, result)
             }
         }
     }
