@@ -555,7 +555,7 @@ impl Catalog {
             screen: Screen::Starting,
             config: Config::default(),
             current_database: None,
-            toasts: Vec::new(),
+            //toasts: Vec::new(),
         }
     }
 

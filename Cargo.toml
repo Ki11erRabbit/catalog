@@ -3,6 +3,11 @@ name = "catalog"
 version = "0.1.0"
 edition = "2024"
 
+[profile.release]
+opt-level = 3
+debug = false
+lto = "fat"
+
 [dependencies]
 sqlx = { version = "0.8", features = [ "runtime-async-std", "sqlite" ] }
 iced = { version = "0.13.1", features = [ "tokio", "advanced" ] }
