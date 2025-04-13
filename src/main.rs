@@ -63,8 +63,11 @@ pub enum Screen {
     Welcome,
     Add {
         rack_number: String,
+        rack_error: String,
         shelf_number: String,
+        shelf_error: String,
         basket_number: String,
+        basket_error: String,
         item_name: String,
     },
     Search {
@@ -117,8 +120,11 @@ impl Catalog {
             Message::AddPressed => {
                 self.screen = Screen::Add {
                     rack_number: String::new(),
+                    rack_error: String::new(),
                     shelf_number: String::new(),
+                    shelf_error: String::new(),
                     basket_number: String::new(),
+                    basket_error: String::new(),
                     item_name: String::new(),
                 };
                 Task::none()
@@ -247,8 +253,9 @@ impl Catalog {
             }
             Message::AddRackUpdate(rack_number) => {
                 match &mut self.screen {
-                    Screen::Add { rack_number: rack, .. } => {
+                    Screen::Add { rack_number: rack, rack_error, .. } => {
                         *rack = rack_number;
+                        *rack_error = String::new();
                     }
                     _ => {}
                 }
@@ -256,8 +263,9 @@ impl Catalog {
             }
             Message::AddShelfUpdate(shelf_number) => {
                 match &mut self.screen {
-                    Screen::Add { shelf_number: shelf, .. } => {
+                    Screen::Add { shelf_number: shelf, shelf_error, .. } => {
                         *shelf = shelf_number;
+                        *shelf_error = String::new();
                     }
                     _ => {}
                 }
@@ -265,8 +273,9 @@ impl Catalog {
             }
             Message::AddBasketUpdate(basket_number) => {
                 match &mut self.screen {
-                    Screen::Add { basket_number: basket, .. } => {
+                    Screen::Add { basket_number: basket, basket_error, .. } => {
                         *basket = basket_number;
+                        *basket_error = String::new();
                     }
                     _ => {}
                 }
@@ -284,26 +293,58 @@ impl Catalog {
             Message::AddItem => {
                 use std::mem::swap;
                 match &mut self.screen {
-                    Screen::Add { rack_number, shelf_number, basket_number, item_name } => {
+                    Screen::Add {
+                        rack_number,
+                        rack_error,
+                        shelf_number,
+                        shelf_error,
+                        basket_number,
+                        basket_error,
+                        item_name
+                    } => {
                         if let Some(database) = self.current_database.take() {
-                            let mut rack = String::new();
-                            let mut shelf = String::new();
-                            let mut basket = String::new();
-                            let mut item = String::new();
-                            swap(rack_number, &mut rack);
-                            swap(shelf_number, &mut shelf);
-                            swap(basket_number, &mut basket);
-                            swap(item_name, &mut item);
 
-                            let future = database::insert(
-                                database,
-                                rack,
-                                shelf,
-                                basket,
-                                item
-                            );
+                            let mut errored = false;
+                            let rack = match rack_number.parse::<i64>() {
+                                Ok(rack) => rack,
+                                Err(_) => {
+                                    errored = true;
+                                    *rack_error = String::from("Expected a number");
+                                    0
+                                }
+                            };
 
-                            Task::perform(future, |x| x)
+                            let shelf = match shelf_number.parse::<u64>() {
+                                Ok(shelf) => shelf,
+                                Err(_) => {
+                                    errored = true;
+                                    *shelf_error = String::from("Expected a number");
+                                    0
+                                }
+                            };
+                            let basket = match basket_number.parse::<u64>() {
+                                Ok(basket) => basket,
+                                Err(_) => {
+                                    errored = true;
+                                    *basket_error = String::from("Expected a number");
+                                    0
+                                }
+                            };
+
+                            if !errored {
+                                let future = database::insert(
+                                    database,
+                                    rack,
+                                    shelf,
+                                    basket,
+                                    item_name.clone()
+                                );
+
+                                Task::perform(future, |x| x)
+                            } else {
+                                Task::none()
+                            }
+
                         } else {
                             Task::none()
                         }
@@ -702,7 +743,15 @@ impl Catalog {
     }
 
     fn add(&self) -> Element<Message> {
-        let Screen::Add { rack_number, shelf_number, basket_number, item_name } = &self.screen else {
+        let Screen::Add {
+            rack_number,
+            rack_error,
+            shelf_number,
+            shelf_error,
+            basket_number,
+            basket_error,
+            item_name
+        } = &self.screen else {
             unreachable!("should have already checked for this state");
         };
         let controls = self.get_controls();
@@ -712,13 +761,13 @@ impl Catalog {
             )
             .push(
                 row![
-                    Self::pair_input_text("Enter rack number", rack_number.as_str(), Message::AddRackUpdate),
-                    Self::pair_input_text("Enter shelf number", shelf_number.as_str(), Message::AddShelfUpdate)
+                    Self::pair_input_text("Enter rack number", rack_number.as_str(), rack_error, Message::AddRackUpdate),
+                    Self::pair_input_text("Enter shelf number", shelf_number.as_str(), shelf_error, Message::AddShelfUpdate)
                 ])
             .push(
                 row![
-                    Self::pair_input_text("Enter basket number", basket_number.as_str(), Message::AddBasketUpdate),
-                    Self::pair_input_text("Enter item name", item_name.as_str(), Message::AddItemUpdate)
+                    Self::pair_input_text("Enter basket number", basket_number.as_str(), basket_error, Message::AddBasketUpdate),
+                    Self::pair_input_text("Enter item name", item_name.as_str(), "", Message::AddItemUpdate)
                 ]
             )
             .push(
@@ -743,7 +792,7 @@ impl Catalog {
             )
             .push(
                 row![
-                    Self::pair_input_text("Enter Item Name", query.as_str(), Message::SearchQueryUpdate),
+                    Self::pair_input_text("Enter Item Name", query.as_str(), "", Message::SearchQueryUpdate),
                     padded_button("Search").on_press(Message::SearchQuery),
                 ]
             );
@@ -780,11 +829,12 @@ impl Catalog {
         content
     }
 
-    fn pair_input_text<'a>(label_text: &'a str, input: &'a str, message: impl Fn(String) -> Message + 'a) -> Column<'a, Message> {
+    fn pair_input_text<'a>(label_text: &'a str, input: &'a str, error: &'a str, message: impl Fn(String) -> Message + 'a) -> Column<'a, Message> {
         column![
             text(label_text),
             text_input(label_text, input)
-                .on_input(message)
+                .on_input(message),
+            text(error),
         ]
     }
 

@@ -76,9 +76,9 @@ pub async fn initialize_database(pool: SqlitePool) -> Message {
 
 pub async fn insert(
     pool: SqlitePool,
-    rack: String,
-    shelf: String,
-    basket: String,
+    rack: i64,
+    shelf: u64,
+    basket: u64,
     name: String
 ) -> Message {
     match pool.begin().await {
@@ -87,7 +87,7 @@ pub async fn insert(
         }
         Ok(mut connection) => {
             let result = sqlx::query("INSERT OR IGNORE INTO Rack (rack_id) VALUES ($1)")
-                .bind(&rack)
+                .bind(rack.to_string())
                 .execute(&mut *connection)
                 .await;
 
@@ -99,7 +99,7 @@ pub async fn insert(
             }
 
             let result = sqlx::query("INSERT OR IGNORE INTO Shelf (shelf_id) VALUES ($1)")
-                .bind(&shelf)
+                .bind(shelf.to_string())
                 .execute(&mut *connection)
                 .await;
 
@@ -111,7 +111,7 @@ pub async fn insert(
             }
 
             let result = sqlx::query("INSERT OR IGNORE INTO Basket (basket_id) VALUES ($1)")
-                .bind(&basket)
+                .bind(basket.to_string())
                 .execute(&mut *connection)
                 .await;
 
@@ -123,10 +123,10 @@ pub async fn insert(
             }
 
             let result = sqlx::query("INSERT INTO Item (rack_id, shelf_id, basket_id, name) VALUES ($1, $2, $3, $4)")
-                .bind(rack)
-                .bind(shelf)
-                .bind(basket)
-                .bind(name)
+                .bind(rack.to_string())
+                .bind(shelf.to_string())
+                .bind(basket.to_string())
+                .bind(name.to_string())
                 .execute(&mut *connection)
                 .await;
 
