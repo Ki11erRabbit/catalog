@@ -52,6 +52,7 @@ pub enum Message {
     DatabaseSearchFailure(Pool<Sqlite>),
     SearchQueryUpdate(String),
     SearchQuery,
+    None,
 }
 
 #[derive(Debug)]
@@ -208,7 +209,8 @@ impl Catalog {
                         .await;
 
                     let Some(file) = file else {
-                        return Message::InitializationFailed(String::from("Failed to select a path"))
+                        return Message::None;
+                        //return Message::InitializationFailed(String::from("Failed to select a path"))
                     };
 
                     let path = file.path()
@@ -386,6 +388,9 @@ impl Catalog {
                 } else {
                     Task::none()
                 }
+            }
+            Message::None => {
+                Task::none()
             }
         }
     }
