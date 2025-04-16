@@ -20,6 +20,7 @@ pub struct ItemInfo {
     shelf_number: String,
     basket_number: String,
     item_name: String,
+    item_notes: String,
 }
 
 
@@ -31,6 +32,7 @@ pub enum Message {
     WelcomePressed,
     SearchPressed,
     AddPressed,
+    DeletePressed,
     InitializationFailed(String),
     InitializationSuccessful(Config),
     InitializeInputChanged(String),
@@ -47,11 +49,14 @@ pub enum Message {
     AddShelfUpdate(String),
     AddBasketUpdate(String),
     AddItemUpdate(String),
+    AddNotesUpdate(String),
     AddItem,
     DatabaseSearchSuccess(Pool<Sqlite>, Vec<ItemInfo>),
     DatabaseSearchFailure(Pool<Sqlite>),
     SearchQueryUpdate(String),
     SearchQuery,
+    DeleteQueryUpdate(String),
+    DeleteQuery,
     None,
 }
 
@@ -70,11 +75,16 @@ pub enum Screen {
         basket_number: String,
         basket_error: String,
         item_name: String,
+        item_notes: String,
     },
     Search {
         query: String,
         result: Vec<ItemInfo>
     },
+    Delete {
+        item_name: String,
+        result: String,
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -127,11 +137,16 @@ impl Catalog {
                     basket_number: String::new(),
                     basket_error: String::new(),
                     item_name: String::new(),
+                    item_notes: String::new(),
                 };
                 Task::none()
             }
             Message::SearchPressed => {
                 self.screen = Screen::Search { result: Vec::new(), query: String::new() };
+                Task::none()
+            }
+            Message::DeletePressed => {
+                self.screen = Screen::Delete { item_name: String::new(), result: String::new() };
                 Task::none()
             }
             Message::InitializationFailed(msg) => {
@@ -292,8 +307,16 @@ impl Catalog {
                 }
                 Task::none()
             }
+            Message::AddNotesUpdate(item_notes) => {
+                match &mut self.screen {
+                    Screen::Add { item_notes: item, .. } => {
+                        *item = item_notes;
+                    }
+                    _ => {}
+                }
+                Task::none()
+            }
             Message::AddItem => {
-                use std::mem::swap;
                 match &mut self.screen {
                     Screen::Add {
                         rack_number,
@@ -302,7 +325,8 @@ impl Catalog {
                         shelf_error,
                         basket_number,
                         basket_error,
-                        item_name
+                        item_name,
+                        item_notes,
                     } => {
                         if let Some(database) = self.current_database.take() {
 
@@ -339,7 +363,8 @@ impl Catalog {
                                     rack,
                                     shelf,
                                     basket,
-                                    item_name.clone()
+                                    item_name.clone(),
+                                    item_notes.clone()
                                 );
 
                                 Task::perform(future, |x| x)
@@ -389,6 +414,27 @@ impl Catalog {
                     Task::none()
                 }
             }
+            Message::DeleteQueryUpdate(query_update) => {
+                match &mut self.screen {
+                    Screen::Delete { item_name, .. } => {
+                        *item_name = query_update;
+                        Task::none()
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::DeleteQuery => {
+                if let Some(database) = self.current_database.take() {
+                    match &self.screen {
+                        Screen::Delete { item_name, ..} => {
+                            Task::perform(database::delete(database, item_name.clone()), |x| x)
+                        }
+                        _ => Task::none(),
+                    }
+                } else {
+                    Task::none()
+                }
+            }
             Message::None => {
                 Task::none()
             }
@@ -405,6 +451,7 @@ impl Catalog {
             Screen::Welcome => self.welcome(),
             Screen::Add {..} => self.add(),
             Screen::Search {..} => self.search(),
+            Screen::Delete {..} => self.delete(),
         }
     }
 
@@ -618,6 +665,9 @@ impl Catalog {
                 padded_button("Search")
                     .on_press(Message::SearchPressed),
                 horizontal_space(),
+                padded_button("Delete")
+                    .on_press(Message::DeletePressed),
+                horizontal_space(),
                 padded_button("Save and Exit")
                     .on_press(Message::Shutdown),
                 horizontal_space(),
@@ -755,7 +805,8 @@ impl Catalog {
             shelf_error,
             basket_number,
             basket_error,
-            item_name
+            item_name,
+            item_notes
         } = &self.screen else {
             unreachable!("should have already checked for this state");
         };
@@ -777,6 +828,7 @@ impl Catalog {
             )
             .push(
                 row![
+                    Self::pair_input_text("Enter item notes", item_notes.as_str(), basket_error, Message::AddNotesUpdate),
                     horizontal_space(),
                     padded_button("Insert").on_press(Message::AddItem)
                 ]
@@ -829,6 +881,33 @@ impl Catalog {
                 scrollable(results));
         }
         
+        let content: Element<_> = column![controls, contents]
+            .into();
+        content
+    }
+
+    fn delete(&self) -> Element<Message> {
+        let controls = self.get_controls();
+        let Screen::Delete { item_name, result } = &self.screen else {
+            unreachable!("already checked for delete state but incorrect");
+        };
+        let mut contents = Self::container("Delete")
+            .push(
+                row![
+                    Self::pair_input_text("Enter Item Name", item_name.as_str(), "", Message::DeleteQueryUpdate),
+                    padded_button("Delete").on_press(Message::SearchQuery),
+                ]
+            );
+
+        if result.len() > 0 {
+            contents = contents.push(
+                text("Item Successfully deleted:").size(20)
+            )
+                .push(
+                    text(item_name.as_str())
+                );
+        }
+
         let content: Element<_> = column![controls, contents]
             .into();
         content

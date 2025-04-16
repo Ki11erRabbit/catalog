@@ -51,7 +51,7 @@ pub async fn initialize_database(pool: SqlitePool) -> Message {
                 "CREATE TABLE Rack (rack_id UNSIGNED BIG INT, PRIMARY KEY (rack_id))",
                 "CREATE TABLE Shelf (shelf_id UNSIGNED BIG INT, rack_id UNSIGNED BIG INT, PRIMARY KEY (shelf_id), FOREIGN KEY (rack_id) REFERENCES Rack(rack_id))",
                 "CREATE TABLE Basket (shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, PRIMARY KEY (basket_id), FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id))",
-                "CREATE TABLE Item (item_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, rack_id UNSIGNED BIG INT, shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id) ON DELETE CASCADE, FOREIGN KEY (basket_id) REFERENCES Basket(basket_id) ON DELETE CASCADE, FOREIGN KEY (rack_id) REFERENCES Rack(rack_id) ON DELETE CASCADE)",
+                "CREATE TABLE Item (item_id INTEGER PRIMARY KEY AUTOINCREMENT, notes TEXT, name TEXT, rack_id UNSIGNED BIG INT, shelf_id UNSIGNED BIG INT, basket_id UNSIGNED BIG INT, FOREIGN KEY (shelf_id) REFERENCES Shelf(shelf_id) ON DELETE CASCADE, FOREIGN KEY (basket_id) REFERENCES Basket(basket_id) ON DELETE CASCADE, FOREIGN KEY (rack_id) REFERENCES Rack(rack_id) ON DELETE CASCADE)",
                 "CREATE INDEX index_item_name ON Item (name)"
             ];
 
@@ -79,7 +79,8 @@ pub async fn insert(
     rack: i64,
     shelf: u64,
     basket: u64,
-    name: String
+    name: String,
+    notes: String,
 ) -> Message {
     match pool.begin().await {
         Err(err) => {
@@ -122,11 +123,12 @@ pub async fn insert(
                 Ok(_) => {}
             }
 
-            let result = sqlx::query("INSERT INTO Item (rack_id, shelf_id, basket_id, name) VALUES ($1, $2, $3, $4)")
+            let result = sqlx::query("INSERT INTO Item (rack_id, shelf_id, basket_id, name, notes) VALUES ($1, $2, $3, $4, $5)")
                 .bind(rack.to_string())
                 .bind(shelf.to_string())
                 .bind(basket.to_string())
                 .bind(name.to_string())
+                .bind(notes.to_string())
                 .execute(&mut *connection)
                 .await;
 
@@ -183,11 +185,48 @@ pub async fn search(
                             shelf_number: row.get::<u64,_>("shelf_id").to_string(),
                             basket_number: row.get::<u64,_>("basket_id").to_string(),
                             item_name: row.get("name"),
+                            item_notes: row.get("notes"),
                         }
                     })
                     .collect::<Vec<_>>();
                 Message::DatabaseSearchSuccess(pool, result)
             }
+        }
+    }
+}
+
+pub async fn delete(
+    pool: SqlitePool,
+    name: String
+) -> Message {
+    match pool.begin().await {
+        Err(err) => {
+            Message::DatabaseTransactionFailure(pool, err.to_string())
+        }
+        Ok(mut connection) => {
+
+            let result = sqlx::query("DELETE FROM Item where name = $1")
+                .bind(name.to_string())
+                .execute(&mut *connection)
+                .await;
+
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
+
+            let result = connection.commit().await;
+
+            match result {
+                Err(err) => {
+                    return Message::DatabaseTransactionFailure(pool, err.to_string());
+                }
+                Ok(_) => {}
+            }
+
+            Message::DatabaseTransactionSuccess(pool)
         }
     }
 }
